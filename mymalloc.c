@@ -39,19 +39,33 @@ void *my_malloc(size_t size) {
       /*if (set->size <= pad) {
         printf("here\n");
         break;
-      } else */if ((set->size < pad) && (set->flink == NULL )) {
+      } else*/ if ((set->size < pad) && (set->flink == NULL )) {
         // reached the end of the list and none of them were big enough
         // need to call sbrk()
         //printf("need to call sbrk()\n");
+//        printf("need to call sbrk on the end of the FL\n");
         set->flink = (Flist) sbrk(8192);
         set->flink->blink = set;
         set = set->flink;
         set->size = 8192;
         set->flink = NULL;
         break;
+      } else if ((set->size >= pad) && (set->flink != NULL)) {
+//        printf("found a big enough node in the middle of the list\n");
+        break;
       }
     }
     if (set == NULL) printf("more than one element, but none of them big enough\n");
+    if ((set->flink == NULL) && (set->size < pad)) {
+//      printf("need to call sbrk()\n");
+      set->flink = (Flist) sbrk(8192);
+      set->flink->blink = set;
+      set = set->flink;
+      set->size = 8192;
+      set->flink = NULL;
+    }
+
+//    printf("set: %d\n", set->size);
 
     beg = (void *) set;
     ret = beg;
@@ -92,21 +106,38 @@ void *my_malloc(size_t size) {
     }
   }
   //  printf("After if/else if\n");
+//      printf("\nsetb: 0x%x\nset: 0x%x\nret: 0x%x\nbeg: 0x%x\nrem: 0x%x\n", setb, set, ret, beg, rem);
+   //   printf("\nset: %d\nret: %d\nbeg: %d\nrem: %d\n", *set, (int *) *ret, (int *) *beg, *rem);
 
+//  printf("set: %d\n", set->size);
   setb = NULL;
   t = set->size;
   set->size = pad;
+  rem->size = t - pad;
   if (set->blink != NULL) {
     setb = set->blink;
-    set->blink->flink = set->flink;
+    if (t == pad) {
+      setb->flink = set->flink;
+    }
+    /*if (set->flink != NULL) {
+      //setb->flink = set->flink;
+    }*/ else {
+      setb->flink = rem;
+    }
+  }
+  if (set->flink != NULL) {
+    rem->flink = set->flink;
+    rem->flink->blink = rem;
+  } else {
+    rem->flink = NULL;
   }
   set->flink = NULL;
   set->blink = NULL;
   if((beg - pad) == FL) {
     FL = beg;
   }
-  rem->size = t - pad;
-  rem->flink = NULL;
+  //rem->size = t - pad;
+  //rem->flink = NULL;
   //rem->flink = set->flink;
   rem->blink = setb;
   if (rem->size < 16) set->size += rem->size;
