@@ -28,12 +28,29 @@ void *my_malloc(size_t size) {
   } else {
     pad = size + 8 + (8 - (size % 8));
   }
+  //printf("pad: %d\n", pad);
 
   // if freeList is more than one element
   if (FL->flink != NULL) {
     set = NULL;
-    for (set = free_list_begin(); set->size < pad; set = free_list_next(set)) {}
-    if (set->size < pad) printf("more than one element, but none of them big enough\n");
+    // iterates through the Free list and finds the first element that is big enough to malloc
+    for (set = free_list_begin(); set->flink != NULL; set = free_list_next(set)) {
+      //printf("   set = %d\n", set->size);
+      if (set->size <= pad) {
+        break;
+      } else if ((set->size < pad) && (set->flink == NULL )) {
+        // reached the end of the list and none of them were big enough
+        // need to call sbrk()
+        //printf("need to call sbrk()\n");
+        set->flink = (Flist) sbrk(8192);
+        set->flink->blink = set;
+        set = set->flink;
+        set->size = 8192;
+        set->flink = NULL;
+        break;
+      }
+    }
+    if (set == NULL) printf("more than one element, but none of them big enough\n");
 
     beg = (void *) set;
     ret = beg;
@@ -52,10 +69,26 @@ void *my_malloc(size_t size) {
 
     //    setb = NULL;
   } else if (FL->size == pad) {
-    printf("just big enough\n"); 
+    // FL is one element and just big enough
+    ret = FL;
+    ret += 8;
+    FL = NULL;
+
+    return ret;
   } else {
     // FL is not big enough
-    printf("need to call sbrk() to make bigger heap\n");
+    //printf("need to call sbrk() to make bigger heap\n");
+    if (FL != NULL) {
+      set = (Flist) sbrk(8192);
+      FL->flink = set;
+      set = FL->flink;
+      set->size = 8192;
+      set->blink = FL;
+      beg = (void *) set;
+      ret = beg;
+      beg += pad;
+      rem = (Flist) beg;
+    }
   }
   //  printf("After if/else if\n");
 
@@ -73,7 +106,9 @@ void *my_malloc(size_t size) {
   }
   rem->size = t - pad;
   rem->flink = NULL;
+  //rem->flink = set->flink;
   rem->blink = setb;
+  if (rem->size < 16) set->size += rem->size;
   if (setb != NULL) setb->flink = rem;
   //if (setb != NULL) {
   //setb->flink = rem;
@@ -90,6 +125,13 @@ void my_free(void *ptr) {
 
   f = ptr;
 
+  if (FL == NULL) {
+    FL = f;
+    FL->flink = NULL;
+    FL->blink = NULL;
+    return;
+  }
+
   //  printf("f->size: %d\n", f->size);
 
   for (tmp = (Flist) free_list_begin(); tmp != NULL; tmp = (Flist) free_list_next(tmp)) {
@@ -101,7 +143,14 @@ void my_free(void *ptr) {
       tmp->blink = f;
 
       if (FL == tmp) FL = f;
-      
+
+      return;
+    } else if (tmp->flink == NULL) {
+      // at end of FL
+      tmp->flink = f;
+      f->blink = tmp;
+      f->flink = NULL;
+
       return;
     }
   }
