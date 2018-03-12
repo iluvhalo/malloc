@@ -36,21 +36,36 @@ void *my_malloc(size_t size) {
     // iterates through the Free list and finds the first element that is big enough to malloc
     for (set = free_list_begin(); set->flink != NULL; set = free_list_next(set)) {
       //printf("   set = %d\n", set->size);
-      if (set->size <= pad) {
+      /*if (set->size <= pad) {
+        printf("here\n");
         break;
-      } else if ((set->size < pad) && (set->flink == NULL )) {
+      } else */if ((set->size < pad) && (set->flink == NULL )) {
         // reached the end of the list and none of them were big enough
         // need to call sbrk()
         //printf("need to call sbrk()\n");
+//        printf("need to call sbrk on the end of the FL\n");
         set->flink = (Flist) sbrk(8192);
         set->flink->blink = set;
         set = set->flink;
         set->size = 8192;
         set->flink = NULL;
         break;
+      } else if ((set->size >= pad) && (set->flink != NULL)) {
+//        printf("found a big enough node in the middle of the list\n");
+        break;
       }
     }
     if (set == NULL) printf("more than one element, but none of them big enough\n");
+    if ((set->flink == NULL) && (set->size < pad)) {
+//      printf("need to call sbrk()\n");
+      set->flink = (Flist) sbrk(8192);
+      set->flink->blink = set;
+      set = set->flink;
+      set->size = 8192;
+      set->flink = NULL;
+    }
+
+//    printf("set: %d\n", set->size);
 
     beg = (void *) set;
     ret = beg;
@@ -91,13 +106,20 @@ void *my_malloc(size_t size) {
     }
   }
   //  printf("After if/else if\n");
+//      printf("\nsetb: 0x%x\nset: 0x%x\nret: 0x%x\nbeg: 0x%x\nrem: 0x%x\n", setb, set, ret, beg, rem);
+   //   printf("\nset: %d\nret: %d\nbeg: %d\nrem: %d\n", *set, (int *) *ret, (int *) *beg, *rem);
 
+//  printf("set: %d\n", set->size);
   setb = NULL;
   t = set->size;
   set->size = pad;
   if (set->blink != NULL) {
     setb = set->blink;
-    set->blink->flink = set->flink;
+    if (set->flink != NULL) {
+      setb->flink = set->flink;
+    } else {
+      setb->flink = rem;
+    }
   }
   set->flink = NULL;
   set->blink = NULL;
@@ -190,6 +212,7 @@ void double_check_memory(int **ptrs, int *dc, int nptrs, int fl_size)
       exit(1);
     }
     h = l + *ip;
+    /* printf("P: 0x%x 0x%x %d\n", l, h, *ip); */
     if (nbytes == 0 || l < low) low = l;
     if (nbytes == 0 || h > high) high = h;
     nbytes += *ip;
@@ -199,19 +222,20 @@ void double_check_memory(int **ptrs, int *dc, int nptrs, int fl_size)
   for (l = free_list_begin(); l != NULL; l = free_list_next(l)) {
     ip = (int *) l;
     h = l + *ip;
+    /* printf("F: 0x%x 0x%x %d\n", l, h, *ip);   */
     if (nbytes == 0 || l < low) low = l;
     if (nbytes == 0 || h > high) high = h;
     nbytes += *ip;
     nfl++;
   }
 
-  if (nbytes != 8192) {
-    printf("Error: Total bytes allocated and on the free list = %d, not 8192\n", nbytes);
+  if (nbytes != 8192*2) {
+    printf("Error: Total bytes allocated and on the free list = %d, not 16384\n", nbytes);
     exit(0);
   }
 
-  if (high - low != 8192) {
-    printf("Error: Highest address (0x%x) minus lowest (0x%x) does not equal 8192\n", (int) high, (int) low);
+  if (high - low != 8192*2) {
+    printf("Error: Highest address (0x%x) minus lowest (0x%x) does not equal 16384\n", (int) high, (int) low);
     exit(0);
   }
 
@@ -221,20 +245,22 @@ void double_check_memory(int **ptrs, int *dc, int nptrs, int fl_size)
   }
 }
 
-
 main()
 {
-  int *ptrs[2];
-  int dc[2];
+  int *ptrs[9];
+  int *free_ptrs[9];
+  int dc[9];
+  int i;
 
-  ptrs[0] = my_malloc(23);
-  dc[0] = 32;
-  ptrs[1] = my_malloc(101);
-  my_free(ptrs[1]);
-  ptrs[1] = my_malloc(108);
-  dc[1] = 120;
+  for (i = 0; i < 6; i++) {
+    if (i > 0) my_free(free_ptrs[i-1]);
+    ptrs[i] = my_malloc(1000+i*16+i%7+1);
+    free_ptrs[i] = my_malloc(1000+i*16+i%7+1);
+    dc[i] = 1000+i*16+16;
+  }
+  my_free(free_ptrs[5]);
 
-  double_check_memory(ptrs, dc, 2, 2);
+  double_check_memory(ptrs, dc, 6, 8);
   printf("Correct\n");
 }
 

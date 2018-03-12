@@ -36,9 +36,10 @@ void *my_malloc(size_t size) {
     // iterates through the Free list and finds the first element that is big enough to malloc
     for (set = free_list_begin(); set->flink != NULL; set = free_list_next(set)) {
       //printf("   set = %d\n", set->size);
-      if (set->size <= pad) {
+      /*if (set->size <= pad) {
+        printf("here\n");
         break;
-      } else if ((set->size < pad) && (set->flink == NULL )) {
+      } else */if ((set->size < pad) && (set->flink == NULL )) {
         // reached the end of the list and none of them were big enough
         // need to call sbrk()
         //printf("need to call sbrk()\n");
