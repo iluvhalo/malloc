@@ -16,13 +16,6 @@ void *my_malloc(size_t size) {
   void *beg, *ret;
   int pad, t;
 
-  if (FL == NULL) {
-    FL = (Flist) sbrk(8192);
-    FL->size = 8192;
-    FL->flink = NULL;
-    FL->blink = NULL;
-  }
-
   if ((size % 8) == 0) {
     pad = size + 8;
   } else {
@@ -30,42 +23,55 @@ void *my_malloc(size_t size) {
   }
   //printf("pad: %d\n", pad);
 
+  if (FL == NULL) {
+    FL = (Flist) sbrk(find_sbrk(pad));
+    FL->size = find_sbrk(pad);
+    FL->flink = NULL;
+    FL->blink = NULL;
+  }
+
   // if freeList is more than one element
   if (FL->flink != NULL) {
     set = NULL;
     // iterates through the Free list and finds the first element that is big enough to malloc
     for (set = free_list_begin(); set->flink != NULL; set = free_list_next(set)) {
       //printf("   set = %d\n", set->size);
-      /*if (set->size <= pad) {
-        printf("here\n");
-        break;
-      } else*/ if ((set->size < pad) && (set->flink == NULL )) {
+      if ((set->size < pad) && (set->flink == NULL )) {
         // reached the end of the list and none of them were big enough
         // need to call sbrk()
-        //printf("need to call sbrk()\n");
-//        printf("need to call sbrk on the end of the FL\n");
-        set->flink = (Flist) sbrk(8192);
+        set->flink = (Flist) sbrk(find_sbrk(pad));
         set->flink->blink = set;
         set = set->flink;
-        set->size = 8192;
+        set->size = find_sbrk(pad);
         set->flink = NULL;
         break;
       } else if ((set->size >= pad) && (set->flink != NULL)) {
-//        printf("found a big enough node in the middle of the list\n");
+        // found a node in the middle of the list that is big enough
         break;
       }
     }
     if (set == NULL) printf("more than one element, but none of them big enough\n");
     if ((set->flink == NULL) && (set->size < pad)) {
-//      printf("need to call sbrk()\n");
-      set->flink = (Flist) sbrk(8192);
+      // checked the whole free list and none of them big enough
+      //    printf("need to call sbrk()\n");
+      if (find_sbrk(pad) == pad) {
+        // sbrk() a section just big enough, but it doesn't have to be added to the free list
+        set = (Flist) sbrk(find_sbrk(pad));
+        set->size = find_sbrk(pad);
+        set->flink = NULL;
+        set->blink = NULL;
+        ret  =(void *) set;
+        ret += 8;
+        return ret;
+      }
+      set->flink = (Flist) sbrk(find_sbrk(pad));
       set->flink->blink = set;
       set = set->flink;
-      set->size = 8192;
+      set->size = find_sbrk(pad);
       set->flink = NULL;
     }
 
-//    printf("set: %d\n", set->size);
+    //    printf("set: %d\n", set->size);
 
     beg = (void *) set;
     ret = beg;
@@ -94,10 +100,19 @@ void *my_malloc(size_t size) {
     // FL is not big enough
     //printf("need to call sbrk() to make bigger heap\n");
     if (FL != NULL) {
-      set = (Flist) sbrk(8192);
-      FL->flink = set;
-      set = FL->flink;
-      set->size = 8192;
+      set = (Flist) sbrk(find_sbrk(pad));
+      if (find_sbrk(pad) == pad) {
+        // the new node created is just big enough, so it doesn't need to be added to FL
+        set->size = find_sbrk(pad);
+        set->flink = NULL;
+        set->blink = NULL;
+        ret = (void *) set;
+        ret += 8;
+        return ret;
+      }
+      if (pad != find_sbrk(pad)) FL->flink = set;
+      //set = FL->flink;
+      set->size = find_sbrk(pad);
       set->blink = FL;
       beg = (void *) set;
       ret = beg;
@@ -106,10 +121,10 @@ void *my_malloc(size_t size) {
     }
   }
   //  printf("After if/else if\n");
-//      printf("\nsetb: 0x%x\nset: 0x%x\nret: 0x%x\nbeg: 0x%x\nrem: 0x%x\n", setb, set, ret, beg, rem);
-   //   printf("\nset: %d\nret: %d\nbeg: %d\nrem: %d\n", *set, (int *) *ret, (int *) *beg, *rem);
+  //      printf("\nsetb: 0x%x\nset: 0x%x\nret: 0x%x\nbeg: 0x%x\nrem: 0x%x\n", setb, set, ret, beg, rem);
+  //   printf("\nset: %d\nret: %d\nbeg: %d\nrem: %d\n", *set, (int *) *ret, (int *) *beg, *rem);
 
-//  printf("set: %d\n", set->size);
+  //  printf("set: %d\n", set->size);
   setb = NULL;
   t = set->size;
   set->size = pad;
@@ -120,7 +135,7 @@ void *my_malloc(size_t size) {
       setb->flink = set->flink;
     }
     /*if (set->flink != NULL) {
-      //setb->flink = set->flink;
+    //setb->flink = set->flink;
     }*/ else {
       setb->flink = rem;
     }
@@ -136,15 +151,9 @@ void *my_malloc(size_t size) {
   if((beg - pad) == FL) {
     FL = beg;
   }
-  //rem->size = t - pad;
-  //rem->flink = NULL;
-  //rem->flink = set->flink;
   rem->blink = setb;
   if (rem->size < 16) set->size += rem->size;
   if (setb != NULL) setb->flink = rem;
-  //if (setb != NULL) {
-  //setb->flink = rem;
-  // }
   ret += 8;
 
   return ret;
@@ -199,5 +208,31 @@ void *free_list_next(void *node) {
 }
 
 void coalesce_free_list() {
+  Flist currentNode, nextNode;
+  void *node;
+  
+  // iterate through the Free list up to the second to last node
+  for (currentNode = free_list_begin(); currentNode->flink != NULL; currentNode = free_list_next(currentNode)) {
+    nextNode = currentNode->flink;
+    node = (void *) currentNode;
 
+    // while the next node is touching the current node
+    while ((node + currentNode->size) == nextNode) {
+      currentNode->size += nextNode->size;
+      currentNode->flink = nextNode->flink;
+      if (currentNode->flink != NULL) currentNode->flink->blink = currentNode;
+      nextNode = currentNode->flink;
+      node = (void *) currentNode;
+    }
+    if (nextNode == NULL) break;
+  }
 }
+
+int find_sbrk(int size) {
+  if (size > 8192) {
+    return size;
+  } else {
+    return 8192;
+  }
+}
+
