@@ -1,28 +1,43 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h> // REMOVE THIS
+// Matt Matto
+// Lab 7 - mymalloc.c
+//
+// COMPILATION - no compilation
+// 
+// USAGE - no usage
+//
+// DESCRIPTION - implements malloc and free according the the way Dr. Plank wants us to
+//               Also can coalecse free memory blocks into larger single blocks
+
 #include "mymalloc.h"
 
+// basic doubly linked list node
 typedef struct flist {
   int size;
   struct flist *flink;
   struct flist *blink;
 } *Flist;
 
+// global free list pointer that points to the beginning of my free list
 Flist FL;
 
+// given a size returns a pointer to a spot in memory if that size
+// if there is no size big enough, calls sbrk() to get more memory from the OS
 void *my_malloc(size_t size) {
-  Flist setb, set, rem;
-  void *beg, *ret;
-  int pad, t;
+  Flist set;      // the Flist pointer for creating the memory block to return
+  Flist setb;     // the Flist pointer for setting the blink pointer in free list nodes
+  Flist rem;      // the Flist pointer for the remaining memory block after breaking off the return memory block
+  void *beg;      // a void * pointer that is equivalent to rem
+  void *ret;      // the return pointer
+  int pad, t;     // pad is the amount of memory to pad size to, and t is just a temp value for setting the free list node's size
 
+  // finds how much to pad the size to
   if ((size % 8) == 0) {
     pad = size + 8;
   } else {
     pad = size + 8 + (8 - (size % 8));
   }
-  //printf("pad: %d\n", pad);
 
+  // if ther is no free list, the sbrk() a new list
   if (FL == NULL) {
     FL = (Flist) sbrk(find_sbrk(pad));
     FL->size = find_sbrk(pad);
@@ -33,12 +48,11 @@ void *my_malloc(size_t size) {
   // if freeList is more than one element
   if (FL->flink != NULL) {
     set = NULL;
+    
     // iterates through the Free list and finds the first element that is big enough to malloc
     for (set = free_list_begin(); set->flink != NULL; set = free_list_next(set)) {
-      //printf("   set = %d\n", set->size);
       if ((set->size < pad) && (set->flink == NULL )) {
         // reached the end of the list and none of them were big enough
-        // need to call sbrk()
         set->flink = (Flist) sbrk(find_sbrk(pad));
         set->flink->blink = set;
         set = set->flink;
@@ -50,10 +64,12 @@ void *my_malloc(size_t size) {
         break;
       }
     }
-    if (set == NULL) printf("more than one element, but none of them big enough\n");
+    
+    // if set is the last element in the free list and it is not big enough
+    // then we need to sbrk() a section
     if ((set->flink == NULL) && (set->size < pad)) {
-      // checked the whole free list and none of them big enough
-      //    printf("need to call sbrk()\n");
+      
+      // check if the section we sbrk() off is going to be added to the free list
       if (find_sbrk(pad) == pad) {
         // sbrk() a section just big enough, but it doesn't have to be added to the free list
         set = (Flist) sbrk(find_sbrk(pad));
@@ -63,21 +79,20 @@ void *my_malloc(size_t size) {
         ret  =(void *) set;
         ret += 8;
         return ret;
+      } else {
+        // sbrk() a new block and stitch it onto the back of the free list
+        set->flink = (Flist) sbrk(8192);
+        set->flink->blink = set;
+        set = set->flink;
+        set->size = find_sbrk(pad);
+        set->flink = NULL;
       }
-      set->flink = (Flist) sbrk(find_sbrk(pad));
-      set->flink->blink = set;
-      set = set->flink;
-      set->size = find_sbrk(pad);
-      set->flink = NULL;
     }
-
-    //    printf("set: %d\n", set->size);
 
     beg = (void *) set;
     ret = beg;
     beg += pad;
     rem = (Flist) beg;
-    //setb->flink = rem;
   } else if (FL->size > pad) {
     // FL is one element and is big enough
     set = FL;
@@ -85,12 +100,9 @@ void *my_malloc(size_t size) {
     ret = beg;
     beg += pad;
     rem = (Flist) beg;
-
-    //    printf("\nsetb: 0x%x\nset: 0x%x\nret: 0x%x\nbeg: 0x%x\nrem: 0x%x\n", setb, set, ret, beg, rem);
-
-    //    setb = NULL;
   } else if (FL->size == pad) {
     // FL is one element and just big enough
+    // then we just have to return that last node and set FL to NULL
     ret = FL;
     ret += 8;
     FL = NULL;
@@ -98,7 +110,6 @@ void *my_malloc(size_t size) {
     return ret;
   } else {
     // FL is not big enough
-    //printf("need to call sbrk() to make bigger heap\n");
     if (FL != NULL) {
       set = (Flist) sbrk(find_sbrk(pad));
       if (find_sbrk(pad) == pad) {
@@ -111,7 +122,6 @@ void *my_malloc(size_t size) {
         return ret;
       }
       if (pad != find_sbrk(pad)) FL->flink = set;
-      //set = FL->flink;
       set->size = find_sbrk(pad);
       set->blink = FL;
       beg = (void *) set;
@@ -120,11 +130,32 @@ void *my_malloc(size_t size) {
       rem = (Flist) beg;
     }
   }
-  //  printf("After if/else if\n");
-  //      printf("\nsetb: 0x%x\nset: 0x%x\nret: 0x%x\nbeg: 0x%x\nrem: 0x%x\n", setb, set, ret, beg, rem);
-  //   printf("\nset: %d\nret: %d\nbeg: %d\nrem: %d\n", *set, (int *) *ret, (int *) *beg, *rem);
 
-  //  printf("set: %d\n", set->size);
+  // now this chunk of code is the code that actually sets the return block and the free list block that we carved off of
+  // Not all cases reach here or look like this, but in general memory looks like :
+  //
+  //        |           |
+  // (Flist)|           |(void *)
+  //        |-----------|
+  //  set-->|   size    |<--ret
+  //        |   flink   |
+  //        |   blink   |       block carved off from the node in the free list
+  //        |           |
+  //        |           |
+  //        |-----------|
+  //  rem-->|   size    |<--beg
+  //        |   flink   |
+  //        |   blink   |       remainder of node from free list
+  //        |           |
+  //        |           |
+  //
+  // set's size, flink, and blink are not yet set, so they are still the values of the free list node we are carving off of
+  // first thing I do is save the size of the free list node from set.size into t then i put pad into set.size
+  // Then, if set has a blink, then we save that with setb and set setb's flink to skip over the block we are carving off
+  // Then, if set has a flink, then we set the FL node set->flink pointed to to be the node rem point to and gets pointed to
+  // if set and FL point to the same then, the we move FL to point to rem
+  // after setting rem->blink to point to setb and setb->flink to point to rem, increment the return pointer 8 and return
+  //
   setb = NULL;
   t = set->size;
   set->size = pad;
@@ -133,10 +164,7 @@ void *my_malloc(size_t size) {
     setb = set->blink;
     if (t == pad) {
       setb->flink = set->flink;
-    }
-    /*if (set->flink != NULL) {
-    //setb->flink = set->flink;
-    }*/ else {
+    } else {
       setb->flink = rem;
     }
   }
@@ -159,13 +187,19 @@ void *my_malloc(size_t size) {
   return ret;
 } // end of my_malloc()
 
+// given a pointer, it creates a node for the free list
+// then it searches the free list for the correct spot to add it
+// the correct spot is the one that maintains sorted order
+// I keep it sorted so coalescing is super easy
+// I understand in the long run it is now as efficient, but I find it easier
 void my_free(void *ptr) {
-  Flist f, tmp;
+  Flist f, tmp;     // Flist node pointers for building the new node and iterating the free list
 
   ptr -= 8;
 
   f = ptr;
 
+  // if ther is no free list. then our node is the new free list
   if (FL == NULL) {
     FL = f;
     FL->flink = NULL;
@@ -173,11 +207,12 @@ void my_free(void *ptr) {
     return;
   }
 
-  //  printf("f->size: %d\n", f->size);
-
+  // iterate through the free list
   for (tmp = (Flist) free_list_begin(); tmp != NULL; tmp = (Flist) free_list_next(tmp)) {
+    
+    // if we found the node we need to insert in front of
+    // stitch our new node into the free list
     if (tmp > f) {
-      // found the next node after ptr in the FL
       f->flink = tmp;
       if (tmp->blink != NULL) tmp->blink->flink = f;
       f->blink = tmp->blink;
@@ -187,7 +222,8 @@ void my_free(void *ptr) {
 
       return;
     } else if (tmp->flink == NULL) {
-      // at end of FL
+      // if we are at the end of the free list
+      // then we just put our new node at the end of the list
       tmp->flink = f;
       f->blink = tmp;
       f->flink = NULL;
@@ -197,19 +233,22 @@ void my_free(void *ptr) {
   }
 } // end of my_free()
 
+// returns the beginning of the free list
 void *free_list_begin() {
   return (void *) FL;
 }
 
+// returns the next node in the free list
 void *free_list_next(void *node) {
   Flist n;
   n = (Flist) node;
   return (void *) n->flink;
 }
 
+// coalesces adjacent nodes in the free list so we are not wasting space on the heap
 void coalesce_free_list() {
-  Flist currentNode, nextNode;
-  void *node;
+  Flist currentNode, nextNode;  // node pointers
+  void *node;                   // used for pointer arithmetic
   
   // iterate through the Free list up to the second to last node
   for (currentNode = free_list_begin(); currentNode->flink != NULL; currentNode = free_list_next(currentNode)) {
@@ -217,6 +256,7 @@ void coalesce_free_list() {
     node = (void *) currentNode;
 
     // while the next node is touching the current node
+    // coalesce the two nodes together and remove the second node from the free list
     while ((node + currentNode->size) == nextNode) {
       currentNode->size += nextNode->size;
       currentNode->flink = nextNode->flink;
@@ -228,6 +268,7 @@ void coalesce_free_list() {
   }
 }
 
+// returns either size or 8192, whichever is bigger
 int find_sbrk(int size) {
   if (size > 8192) {
     return size;
